@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Timesheet">
+<meta name="theme-color" content="#14365d">
+<link rel="manifest" href="manifest.json">
+<title>MAG Timesheet</title>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/umd.js"></script>
+<style>
+:root{--blue:#14365d}
+*{box-sizing:border-box}
+body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:#f2f4f7;padding-bottom:90px}
+header{background:var(--blue);color:#fff;padding:14px 14px 10px;padding-top:max(14px,env(safe-area-inset-top))}
+header h1{font-size:17px;margin:0}
+nav{display:flex;background:#fff;border-bottom:1px solid #ccd}
+nav button{flex:1;padding:12px;border:0;background:none;font-size:16px;color:#555}
+nav button.on{color:var(--blue);border-bottom:3px solid var(--blue);font-weight:600}
+main{padding:10px}
+.card{background:#fff;border-radius:12px;padding:12px;margin:10px 0;box-shadow:0 1px 3px #0002}
+label.f{display:block;font-size:12px;color:#667;margin:8px 0 2px}
+input,select,textarea{font-size:17px;width:100%;padding:9px;border:1px solid #bbc;border-radius:8px;background:#fff}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.chk{display:flex;gap:18px;margin-top:10px}
+.chk label{display:flex;align-items:center;gap:8px;font-size:17px}
+.chk input{width:24px;height:24px}
+.head{display:flex;justify-content:space-between;align-items:center}
+.x{background:none;border:0;font-size:22px;color:#b00;width:auto}
+.hrs{color:var(--blue);font-weight:600}
+button.p{background:var(--blue);color:#fff;border:0;border-radius:10px;padding:13px;font-size:17px}
+button.s{background:#e3e8ef;color:var(--blue);border:0;border-radius:10px;padding:12px;font-size:16px}
+.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #ccd;padding:10px 12px max(10px,env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center}
+.bar .tot{flex:1;font-weight:600;color:var(--blue)}
+.arch{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.arch span{font-size:15px;word-break:break-all}
+#toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:20px;display:none;z-index:9}
+</style></head><body>
+<header><h1>Michigan Asset Group — Maintenance Timesheet</h1></header>
+<nav><button id="t1" class="on" onclick="tab(1)">New</button><button id="t2" onclick="tab(2)">Archive</button></nav>
+<div id="toast"></div>
+<main id="v1">
+ <div class="card">
+  <label class="f">Employee</label><input id="emp" placeholder="Your name">
+  <label class="f">Date</label>
+  <div class="g2"><input type="date" id="dt"><button class="s" type="button" onclick="setToday()">Today</button></div>
+  <div class="hrs" id="dayLabel" style="margin-top:6px"></div>
+ </div>
+ <div id="rows"></div>
+ <button class="s" style="width:100%" onclick="addRow()">+ Add work order</button>
+ <button class="s" style="width:100%;margin-top:8px" onclick="managePropsList()">Edit property list</button>
+ <button class="s" style="width:100%;margin-top:8px" onclick="resetForm()">Clear all entries</button>
+</main>
+<main id="v2" style="display:none"><div id="archList"></div></main>
+<div class="bar" id="bar">
+ <div class="tot" id="tot"></div>
+ <button class="s" onclick="build('save')">Save</button>
+ <button class="p" onclick="build('send')">Send</button>
+</div>
+<script>
+const TEMPLATE_B64 = "JVBERi0xLjMKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDYxMiA3OTIgXSAvUGFyZW50IDcgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjUgMCBvYmoKPDwKL1BhZ2VNb2RlIC9Vc2VOb25lIC9QYWdlcyA3IDAgUiAvVHlwZSAvQ2F0YWxvZwo+PgplbmRvYmoKNiAwIG9iago8PAovQXV0aG9yIChhbm9ueW1vdXMpIC9DcmVhdGlvbkRhdGUgKEQ6MjAyNjExMDMyMjA4MzkrMDAnMDAnKSAvQ3JlYXRvciAoYW5vbnltb3VzKSAvS2V5d29yZHMgKCkgL01vZERhdGUgKEQ6MjAyNjExMDMyMjA4MzkrMDAnMDAnKSAvUHJvZHVjZXIgKFJlcG9ydExhYiBQREYgTGlicmFyeSAtIFwob3BlbnNvdXJjZVwpKSAKICAvU3ViamVjdCAodW5zcGVjaWZpZWQpIC9UaXRsZSAoVGltZXNoZWV0OiBNYWludGVuYW5jZSBTdGFmZiBcKEJsYW5rIFRlbXBsYXRlXCkpIC9UcmFwcGVkIC9GYWxzZQo+PgplbmRvYmoKNyAwIG9iago8PAovQ291bnQgMSAvS2lkcyBbIDQgMCBSIF0gL1R5cGUgL1BhZ2VzCj4+CmVuZG9iago4IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDI1MzIKPj4Kc3RyZWFtCkdhdG0+YkFKT2AmQTdsamsqWTVGbkdWIi9AYHIoZlpeLCRcJmFWTUMlUkhWI0lRb3Q/Wi5aNm4+N1YyWj1SOz5VYD43Ll9YUHE1LylaSC0ibW0jXWJpTzxoJXAiZytzJWNeb0tuXURDJm4mJz1dZElXMFxMUldSPipWL2lKOz1YLTFUXVZtXVpTTEQiMzJHSjRablVLZnEhJVw5bUZUQzZjLXJuQklHS3EkX29xSzhxPCkyYUhQaDVtY3AmPz4tN0dGRSFFI24+JSgjMG1wak4mOUZoOFsvJSxYIik6Wk0uX281cVNiP0g6PWhyTlM9OWVia3VETUxNUG4sL0E5SDJDWHU/UjQkWDlKLFhsakElVlwrZTVSQGNdRDZZIVRtZlojPEQjLlttdDY+ZWRgTTk9ckEyKlgyOC1ES2NbPDR0K1xaWEc8XD5YYi1adWtyUFhFJDA7V2lbYU9QVEhOVVwmdD85SWZFN2o0KXJLLyYvN3VXKCpZNWhFNVZAMV0qXEJAJ2RLViFHSl84am1uZ2xGJmU0RF1YcU9yKWhNNTxSZmY4cUVjcDYrQE1POSJTP2I9X1tQU15EVUtzNzImTytdTigmMm1uU1w3Pm5hUU91JDdZZz1ATScqQTBQWjk9c14vI0stSnIuR3BUOEtRO0xsJGRBQVlXbC0rPTdfUUtBKEklJkxvKz9USWRkLTszWG0zT15PJiU6MFUyZGZMLkQkTD1XU3VPXFxpWic3Ny8lK2JcRGgpP0RSLFI4ITAkWlRXX1RRbydGUWlAIyNoKV5gZztAQkleTTg7TitVajBbWUZpWy1hLlBbai5rJysocDsvW25RJWAkQnJkcTlaOThBbGhZTy84QzkySyFfMlFYLG9yU1FxMT5EaUNAJG08YEBMP19yPSJHXDdrJzZvWi1DXWdUWiU4Z1YtcDtTL0ZqIjtrZG8+Y1Mpb25tRT46YjtRVXA9ZGItQFdcIzc6OjY2MGo4UVUnWGZTYHBEJSpoUCdNJDtrTnRfR1kuQ0clayVnW2BRT1BwTm1hcHJdbGphYCZRUCRoN1RzSmtxJ2RuPDFLW21NWHQwMm1AR3EyZG1eaDZWc2ltdSRhZEIsUVlyUGhFOFpJTVxCOlo2bU48NzsrRklOSWg/Rl8tOTc9KT9PSG5HXkJPKk8qXCVCK2BqKiNYNS9wLVNdVjNmNyxWbFtJT1EvTCw+ZHRTRVQ5YCtJMCpJIyFNTDo+ZSVoM1gkLVldKSRiLTBFWmliOWouQFZdPzpEWVEtS2o+RGtXYyFORGNVZEZkazRfRWZYZlEmQTNqKHJYQCM7R2dVRmE1ZWB0JyM3OSlQXixBKycrKiQkNlNZWkwsOjQkUyowWDNQRlNsLlBMTU0uKyNbST8vTShXPzBcNSJqRzxNOik8Wz8tSiQjVDtNUkA9P0w/Ji0/PVgiUiVhV3FCLitZSjhUdVAmPGRDP2wkUSNOQmxnPzArU2pTQk0xQks9YVdpLEVjdSUtZzdTRyFXQzYrVTBZYiNNZEJScy9XKVNbXTclaGUpUnFbcCw2M0xAJTdzJ1RsXCMpJWorMyJSRmRCZ0olZyo/SmJKYHJcY2tDKiYkV0cnZj00VGxvVlpxRSwkXlxfO1tYYEldLywuaS5iIjlQIllEXz8+M0o4RlRLZSckTFwoS0xxYS4rUk1sIlhRP2tdJFApcnBGaTU+XkpDSUU7a2dvNSs2QnQwYzZVLCViPChtXUk2QlxtcG1MXiFEI3NMVSQ2bG8uQzciV1wrbHBHTkBNTVZIbD8sXW9oSCVNRE9FKyEwTSVaR3Eqa1gmTV0uUWJOYydnJls1OStmOiUmNDQ5ZkFTUyo7JkoxLjw1aEE8TiNWZmBsRjwtVHJRcGBvK2xHTlh1NGcoWjdVZzprYDY4XWNYXWc5TVtvR2ZdayZYKkxAIlxAb0Q+MFoxaTg9PElPLFYzXiJVRCxjSE0+M21FTW5aaWUnNEdwcDo1IkpzMyJbTGVrc1VoQCpEWE9jZkU/IUxIOzksQkZ1cDlYVmQldXAiN2FvOktXLzVENyhRaG4tZGlfOzNZQTZwTChlIUk0XGlyLVdPb19WTiFORUVtNmVzb3AxX3VrLVdqJWxrVCRoSyw5WEJuMTpoVGpKUGAyVS5SIiJPOVo9cVhKdExuXFlrSmZlTSQuSGtFVnVnPDBwKUdWMUBATUVLU2k+KD5HZUc8cm5bbDdPVDh1Tyk5MyR1Jzpqcj0lZlRKXG8uND51cDF1MCUzPiJTa1InOTkvRllqLy9kTD4+I0JHciRAYl5jaksmZUw2NGEoXXIlVWVTIyNLQi09VSxYVi9FNykhKDIhSVkzdENyQFU5VSc9MTw4LjQuMSNIPihmTTFlOzhJWyE6YVJoPVJSUVtOaiIxVyY0IWJtNSFLMGRCQWpkdTVpYzNtPltYT2hRTUFiUXEvNjJCcl5HRmM7KSdqL15FMTtuOlZARk4maURVYW0zOyw+O1lYMVZzOUFiX1ZhLzUzVDsoKWR1WEJtMEdgKzUmR1o2KF5pV0RrY1dTJSZXalJSKTtUVjE1Y0BSXTYtal4qUiM2YTpHYltVUW0idGN0T15SLkEsWyk2YmBDLDwkYit1ZloncEFvOGNAI1deIztNPkBrRikhdCcuUD9fJkpNT28zTyxKY2Aob1tQO0ZJZjhLWztEXVJAPGVeIk43KVJkIUYlcTY7M2FJWFRwLXAtNHU5ZXE+YSdVPmNlN1FdN3JuMUMtQEIjX1pVJEUmIjsxLThWQk1BUCNAQVdacm1vO0JiXzlmTV9iMllNcEFkVkcuUWErMCEmU1JRcz9nOEA6REJDS0YpZVRPZWwqNipMU2lBXy0rQz0qRlhpXUcvU1w7cXFDay9MNUs1UTdYPzdFMEBDTD89cU42aUwoZzgsNFwhQFZGIi9YJSdvV0VeM2MuOitVJVczPENCcDQzPjRgOy80OUFERi0pNFxSJypxU0ZxTzJUby1bTFQqXzpZS0BhbTtiJzBwLy1mSllacyM6VzRTR2RFcDJaXk5pKz1yKzJnXmVmPUpuKFc9N2FFQnFSJ3IiVyVealMoSGxiOWxfZjtNXm1yWikqN2U2TzlBb19CTGtcZDBULTo3JG4hLCM+SERcS0dpLVc6XWIpPWlBZGVJSkAqO0dFZmRBPFFwZG09Sz8sdUYrSkBoaEgmXDFaPUIkRVYrOz5UdT1Vbj5CR1osZHUoLkohcSg3ZkEyTi0iTFVOKmpcXTBZKEwvX1NnYjojU1pMMStcU3BJKV91OEBlQTg4IjZeVj5sJTVDW1dhVztMXllQJyw1al8/JGcnYW0nYlkjcyYuMFU0Ti4jU1pQWiw2XytAYTEtakFAOGBnOykvZkVZOldbLjp+PmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDkKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwOSAwMDAwMCBuIAowMDAwMDAwMzIxIDAwMDAwIG4gCjAwMDAwMDA1MTQgMDAwMDAgbiAKMDAwMDAwMDU4MiAwMDAwMCBuIAowMDAwMDAwODgyIDAwMDAwIG4gCjAwMDAwMDA5NDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovSUQgCls8MmUzNDlkNTEwOWVkNDNjZmFlMDk5Nzc4YTA0NDY1YTc+PDJlMzQ5ZDUxMDllZDQzY2ZhZTA5OTc3OGEwNDQ2NWE3Pl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyA2IDAgUgovUm9vdCA1IDAgUgovU2l6ZSA5Cj4+CnN0YXJ0eHJlZgozNTY0CiUlRU9GCg==";
+const $ = id => document.getElementById(id);
+const emp=$('emp'), dt=$('dt'), rows=$('rows');
+emp.value = localStorage.emp || '';
+emp.onchange = () => localStorage.emp = emp.value.trim();
+const todayStr = () => { const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); };
+function showDay(){
+  if(!dt.value){ $('dayLabel').textContent=''; return; }
+  const [y,m,d]=dt.value.split('-').map(Number);
+  $('dayLabel').textContent = new Date(y,m-1,d).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+}
+function setToday(){ dt.value=todayStr(); showDay(); }
+dt.onchange=showDay; setToday();
+function toast(t){ const e=$('toast'); e.textContent=t; e.style.display='block'; setTimeout(()=>e.style.display='none',2500); }
+function tab(n){
+  $('v1').style.display=n==1?'':'none'; $('v2').style.display=n==2?'':'none';
+  $('bar').style.display=n==1?'flex':'none';
+  $('t1').className=n==1?'on':''; $('t2').className=n==2?'on':'';
+  if(n==2) loadArchive();
+}
+let props = JSON.parse(localStorage.props || '["Property A","Property B","Property C"]');
+const saveProps = () => localStorage.props = JSON.stringify(props);
+const esc = s => s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+function propOptions(sel=''){
+  return '<option value="">Select property…</option>' +
+   props.map(p=>`<option value="${esc(p)}" ${p===sel?'selected':''}>${esc(p)}</option>`).join('') +
+   '<option value="__add">+ Add new…</option>';
+}
+function refreshProps(){ document.querySelectorAll('select[data-f=prop]').forEach(s=>{const c=s.value; s.innerHTML=propOptions(c);}); }
+function onPropChange(sel){
+  if(sel.value!=='__add') return;
+  const n=(prompt('New property name:')||'').trim();
+  if(n && !props.includes(n)){ props.push(n); props.sort(); saveProps(); }
+  refreshProps(); sel.value = props.includes(n)?n:'';
+}
+function managePropsList(){
+  const t=prompt('Edit properties (one per line):', props.join('\n'));
+  if(t===null) return;
+  props=t.split('\n').map(s=>s.trim()).filter(Boolean); saveProps(); refreshProps();
+}
+function addRow(){
+  const d=document.createElement('div'); d.className='card';
+  d.innerHTML=`<div class="head"><b class="ttl"></b><button class="x" onclick="delRow(this)">✕</button></div>
+   <div class="g2"><div><label class="f">Work order #</label><input data-f="wo" inputmode="numeric"></div>
+   <div><label class="f">Unit</label><input data-f="unit"></div></div>
+   <label class="f">Property</label><select data-f="prop" onchange="onPropChange(this)">${propOptions()}</select>
+   <div class="g2"><div><label class="f">Time in</label><input type="time" data-f="in"></div>
+   <div><label class="f">Time out</label><input type="time" data-f="out"></div></div>
+   <div class="hrs" data-f="hrs"></div>
+   <div class="chk"><label><input type="checkbox" data-f="tc"> Tenant charge</label>
+   <label><input type="checkbox" data-f="wd"> Work done</label></div>
+   <label class="f">Account code</label><input data-f="acct">
+   <label class="f">Stock used</label><input data-f="stock">
+   <label class="f">Work done</label><textarea data-f="work" rows="3"></textarea>`;
+  d.oninput=calc; d.onchange=calc; rows.append(d); renum(); calc();
+  d.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function delRow(b){ b.closest('.card').remove(); renum(); calc(); }
+function renum(){ [...rows.children].forEach((d,i)=>d.querySelector('.ttl').textContent='Work order '+(i+1)); }
+function resetForm(){ if(confirm('Clear all work orders?')){ rows.innerHTML=''; addRow(); } }
+const val=(d,k)=>{const e=d.querySelector(`[data-f="${k}"]`); return e.type==='checkbox'?e.checked:e.value.trim();};
+const toMin=t=>{const [h,m]=t.split(':'); return +h*60 + +m;};
+function mins(d){ const a=val(d,'in'), b=val(d,'out'); if(!a||!b) return 0; let x=toMin(b)-toMin(a); return x<0?x+1440:x; }
+const hrs=m=>(m/60).toFixed(2);
+const t12=t=>{ if(!t) return ''; let [h,m]=t.split(':').map(Number); const s=h>=12?'p':'a'; h=h%12||12; return `${h}:${String(m).padStart(2,'0')}${s}`; };
+function calc(){
+  let total=0;
+  [...rows.children].forEach(d=>{ const m=mins(d); total+=m; d.querySelector('[data-f="hrs"]').textContent = m?`Time: ${hrs(m)} hrs`:''; });
+  const n=rows.children.length;
+  $('tot').textContent=`Total ${hrs(total)} hrs · ${Math.max(1,Math.ceil(n/6))} pg`;
+}
+function b64ToBytes(b){ const s=atob(b), u=new Uint8Array(s.length); for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i); return u; }
+async function makePdf(){
+  const {PDFDocument,StandardFonts}=PDFLib;
+  const tpl=await PDFDocument.load(b64ToBytes(TEMPLATE_B64));
+  const out=await PDFDocument.create();
+  const font=await out.embedFont(StandardFonts.Helvetica);
+  const Y=y=>792-y;
+  const entries=[...rows.children];
+  const nPages=Math.max(1,Math.ceil(entries.length/6));
+  const [yr,mo,da]=dt.value.split('-').map(Number);
+  const date=new Date(yr,mo-1,da);
+  const dayName=date.toLocaleDateString('en-US',{weekday:'long'});
+  const dateStr=date.toLocaleDateString('en-US');
+  let grand=0;
+  for(let p=0;p<nPages;p++){
+    const [page]=await out.copyPages(tpl,[0]); out.addPage(page);
+    const T=(s,x,y,sz=8)=>{ if(s!==''&&s!=null) page.drawText(String(s),{x,y:Y(y),size:sz,font}); };
+    const fit=(s,x,y,maxW,sz=8)=>{ while(sz>5 && font.widthOfTextAtSize(s,sz)>maxW) sz-=0.5; T(s,x,y,sz); };
+    fit(emp.value,97,64,115,9); T(dayName,263,64,9); T(dateStr,370,64,9);
+    T(p+1,500,64,9); T(nPages,562,64,9);
+    entries.slice(p*6,p*6+6).forEach((d,i)=>{
+      const o=i*112.5, r=o+116, m=mins(d); grand+=m;
+      fit(val(d,'wo'),38,r,54);
+      fit(val(d,'prop'),97,r,76);
+      fit(val(d,'unit'),177,r,36);
+      T(t12(val(d,'in')),217,r,7.5); T(t12(val(d,'out')),256,r,7.5);
+      T('X', val(d,'tc')?309:348, r, 9);
+      T('X', val(d,'wd')?386:425, r, 9);
+      fit(val(d,'acct'),451,r,72);
+      T(m?hrs(m):'',532,r,9);
+      fit(val(d,'stock'),90,o+135,82,7);
+      const words=val(d,'work').split(/\s+/).filter(Boolean);
+      const lines=[[240,340,o+135],[190,390,o+152],[190,390,o+169.5],[190,390,o+187]];
+      let li=0, cur='';
+      for(const w of words){
+        if(li>3) break;
+        const test=cur?cur+' '+w:w;
+        if(font.widthOfTextAtSize(test,7.5)>lines[li][1] && cur){ T(cur,lines[li][0],lines[li][2],7.5); li++; cur=w; }
+        else cur=test;
+      }
+      if(li<=3 && cur) T(cur,lines[li][0],lines[li][2],7.5);
+    });
+    if(p===nPages-1) T('TOTAL TIME: '+hrs(grand)+' hrs',455,773,10);
+  }
+  return out.save();
+}
+async function build(mode){
+  if(!dt.value){ alert('Please choose a date.'); return; }
+  if(!emp.value.trim()){ alert('Please enter your name.'); emp.focus(); return; }
+  try{
+    const bytes=await makePdf();
+    const name=`Timesheet_${dt.value}_${emp.value.trim().replace(/\s+/g,'_')}.pdf`;
+    await idbKeyval.set(name,bytes);
+    await shareFile(name,bytes);
+  }catch(e){ if(e.name!=='AbortError') alert('Error: '+e.message); }
+}
+async function shareFile(name,bytes){
+  const file=new File([bytes],name,{type:'application/pdf'});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    await navigator.share({files:[file],title:name,text:'Timesheet '+name});
+    toast('Archived in app');
+  } else {
+    const a=document.createElement('a'); a.href=URL.createObjectURL(file); a.download=name; a.click();
+    toast('Downloaded');
+  }
+}
+async function loadArchive(){
+  const keys=(await idbKeyval.keys()).sort().reverse();
+  const L=$('archList');
+  if(!keys.length){ L.innerHTML='<div class="card">No archived timesheets yet.</div>'; return; }
+  L.innerHTML='';
+  keys.forEach(k=>{
+    const c=document.createElement('div'); c.className='card arch';
+    c.innerHTML=`<span>${esc(k)}</span><span><button class="s" data-a="share">Share</button> <button class="s" data-a="view">View</button> <button class="s" data-a="del">🗑</button></span>`;
+    c.querySelector('[data-a=share]').onclick=async()=>{ try{ await shareFile(k,await idbKeyval.get(k)); }catch(e){} };
+    c.querySelector('[data-a=view]').onclick=async()=>{ const b=await idbKeyval.get(k); window.open(URL.createObjectURL(new Blob([b],{type:'application/pdf'}))); };
+    c.querySelector('[data-a=del]').onclick=async()=>{ if(confirm('Delete '+k+' from app archive?')){ await idbKeyval.del(k); loadArchive(); } };
+    L.append(c);
+  });
+}
+addRow();
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script></body></html>
