@@ -47,7 +47,10 @@ button.s{background:#e3e8ef;color:var(--blue);border:0;border-radius:10px;paddin
   <div class="hrs" id="dayLabel" style="margin-top:6px"></div>
  </div>
  <div id="rows"></div>
+ <div id="atts"></div>
  <button class="s" style="width:100%" onclick="addRow()">+ Add work order</button>
+ <button class="s" style="width:100%;margin-top:8px" onclick="$('photoIn').click()">+ Add receipt photo</button>
+ <input type="file" id="photoIn" accept="image/*" multiple hidden onchange="addPhotos(this.files)">
  <button class="s" style="width:100%;margin-top:8px" onclick="managePropsList()">Edit property list</button>
  <button class="s" style="width:100%;margin-top:8px" onclick="resetForm()">Clear all entries</button>
 </main>
@@ -98,6 +101,35 @@ function managePropsList(){
   if(t===null) return;
   props=t.split('\n').map(s=>s.trim()).filter(Boolean); saveProps(); refreshProps();
 }
+const atts = [];
+async function toJpeg(file){
+  const url = URL.createObjectURL(file), img = new Image();
+  await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = url; });
+  const s = Math.min(1, 1600 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(url);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.8));
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), w: c.width, h: c.height,
+           thumb: c.toDataURL('image/jpeg', 0.4), note: '' };
+}
+async function addPhotos(files){
+  for (const f of files) { try { atts.push(await toJpeg(f)); } catch(e) { alert('Could not read that photo.'); } }
+  $('photoIn').value = ''; renderAtts();
+}
+function renderAtts(){
+  const box = $('atts'); box.innerHTML = '';
+  atts.forEach((a, i) => {
+    const c = document.createElement('div'); c.className = 'card';
+    c.innerHTML = `<div class="head"><b>Receipt ${i+1}</b><button class="x">✕</button></div>
+      <img src="${a.thumb}" style="max-width:100%;max-height:140px;border-radius:8px">
+      <label class="f">Notes</label><textarea rows="2"></textarea>`;
+    const ta = c.querySelector('textarea'); ta.value = a.note; ta.oninput = () => a.note = ta.value;
+    c.querySelector('.x').onclick = () => { atts.splice(i, 1); renderAtts(); };
+    box.append(c);
+  });
+}
 function timeField(key, label) {
   const hrs = '<option value="">--</option>' +
     [...Array(12)].map((_, i) => `<option value="${i+1}">${i+1}</option>`).join('');
@@ -118,7 +150,6 @@ function addRow(){
    <div class="hrs" data-f="hrs"></div>
    <div class="chk"><label><input type="checkbox" data-f="tc"> Tenant charge</label>
    <label><input type="checkbox" data-f="wd"> Work done</label></div>
-   <label class="f">Account code</label><input data-f="acct">
    <label class="f">Stock used</label><input data-f="stock">
    <label class="f">Work done</label><textarea data-f="work" rows="3"></textarea>`;
   d.oninput=calc; d.onchange=calc; rows.append(d); renum(); calc();
@@ -126,7 +157,7 @@ function addRow(){
 }
 function delRow(b){ b.closest('.card').remove(); renum(); calc(); }
 function renum(){ [...rows.children].forEach((d,i)=>d.querySelector('.ttl').textContent='Work order '+(i+1)); }
-function resetForm(){ if(confirm('Clear all work orders?')){ rows.innerHTML=''; addRow(); } }
+function resetForm(){ if(confirm('Clear all work orders and photos?')){ rows.innerHTML=''; atts.length=0; renderAtts(); addRow(); } }
 const val = (d, k) => {
   const e = d.querySelector(`[data-f="${k}"]`);
   if (e.dataset.t) {
@@ -163,33 +194,49 @@ async function makePdf(){
   let grand=0;
   for(let p=0;p<nPages;p++){
     const [page]=await out.copyPages(tpl,[0]); out.addPage(page);
-    const T=(s,x,y,sz=8)=>{ if(s!==''&&s!=null) page.drawText(String(s),{x,y:Y(y),size:sz,font}); };
-    const fit=(s,x,y,maxW,sz=8)=>{ while(sz>5 && font.widthOfTextAtSize(s,sz)>maxW) sz-=0.5; T(s,x,y,sz); };
-    fit(emp.value,97,64,115,9); T(dayName,263,64,9); T(dateStr,370,64,9);
-    T(p+1,500,64,9); T(nPages,562,64,9);
+    const T=(s,x,y,sz=7)=>{ if(s!==''&&s!=null) page.drawText(String(s),{x,y:Y(y),size:sz,font}); };
+    const fit=(s,x,y,maxW,sz=7)=>{ while(sz>5 && font.widthOfTextAtSize(s,sz)>maxW) sz-=0.5; T(s,x,y,sz); };
+    fit(emp.value,97,64,115,8); T(dayName,263,64,8); T(dateStr,370,64,8);
+    T(p+1,500,64,8); T(nPages,562,64,8);
     entries.slice(p*6,p*6+6).forEach((d,i)=>{
       const o=i*112.5, r=o+116, m=mins(d); grand+=m;
       fit(val(d,'wo'),38,r,54);
       fit(val(d,'prop'),97,r,76);
       fit(val(d,'unit'),177,r,36);
-      T(t12(val(d,'in')),217,r,7.5); T(t12(val(d,'out')),256,r,7.5);
-      T('X', val(d,'tc')?309:348, r, 9);
-      T('X', val(d,'wd')?386:425, r, 9);
-      fit(val(d,'acct'),451,r,72);
-      T(m?hrs(m):'',532,r,9);
-      fit(val(d,'stock'),90,o+135,82,7);
+      T(t12(val(d,'in')),217,r,6.5); T(t12(val(d,'out')),256,r,6.5);
+      if (val(d,'tc')) T('X',309,r,8);
+      if (val(d,'wd')) T('X',386,r,8);
+      T(m?hrs(m):'',532,r,8);
+      fit(val(d,'stock'),90,o+135,82,6);
       const words=val(d,'work').split(/\s+/).filter(Boolean);
       const lines=[[240,340,o+135],[190,390,o+152],[190,390,o+169.5],[190,390,o+187]];
       let li=0, cur='';
       for(const w of words){
         if(li>3) break;
         const test=cur?cur+' '+w:w;
-        if(font.widthOfTextAtSize(test,7.5)>lines[li][1] && cur){ T(cur,lines[li][0],lines[li][2],7.5); li++; cur=w; }
+        if(font.widthOfTextAtSize(test,6.5)>lines[li][1] && cur){ T(cur,lines[li][0],lines[li][2],6.5); li++; cur=w; }
         else cur=test;
       }
-      if(li<=3 && cur) T(cur,lines[li][0],lines[li][2],7.5);
+      if(li<=3 && cur) T(cur,lines[li][0],lines[li][2],6.5);
     });
-    if(p===nPages-1) T('TOTAL TIME: '+hrs(grand)+' hrs',455,773,10);
+    if(p===nPages-1) T('TOTAL TIME: '+hrs(grand)+' hrs',455,773,9);
+  }
+  for (let i = 0; i < atts.length; i++) {
+    const a = atts[i], pg = out.addPage([612, 792]), img = await out.embedJpg(a.bytes);
+    pg.drawText(`Receipt ${i+1} of ${atts.length} - ${emp.value} - ${dateStr}`, {x:36, y:792-40, size:11, font});
+    const sc = Math.min(540 / a.w, 560 / a.h), w = a.w * sc, h = a.h * sc;
+    pg.drawImage(img, {x: 36 + (540 - w) / 2, y: 792 - 60 - h, width: w, height: h});
+    let y = 792 - 60 - h - 20;
+    for (const para of (a.note || '').split('\n')) {
+      let line = '';
+      for (const word of para.split(/\s+/)) {
+        const t = line ? line + ' ' + word : word;
+        if (font.widthOfTextAtSize(t, 10) > 540 && line) { pg.drawText(line, {x:36, y, size:10, font}); y -= 13; line = word; }
+        else line = t;
+      }
+      if (line) { pg.drawText(line, {x:36, y, size:10, font}); y -= 13; }
+      if (y < 40) break;
+    }
   }
   return out.save();
 }
